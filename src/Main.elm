@@ -120,6 +120,7 @@ initSort =
 
 type Msg
     = UpdateSettings SettingsMsg
+    | ToggleDescriptionVisibility Course
 
 
 type SettingsMsg
@@ -257,6 +258,41 @@ update msg model =
                     | settings = settings
                     , displayedCourses = displayedCourses
                 }
+
+        ToggleDescriptionVisibility course ->
+            let
+                newCourses =
+                    updateFirstMatch
+                        (sameCourseNumberAsCourse course)
+                        (\courseView -> { courseView | descriptionVisible = not courseView.descriptionVisible })
+                        model.displayedCourses
+            in
+                { model | displayedCourses = newCourses }
+
+
+sameCourseNumberAsCourse : Course -> CourseView -> Bool
+sameCourseNumberAsCourse course courseView =
+    let course' = courseView.course
+    in
+        course.department == course'.department
+            && course.number == course'.number
+            && course.section == course'.section
+
+updateFirstMatch : (a -> Bool) -> (a -> a) -> List a -> List a
+updateFirstMatch pred updater items =
+    let
+        updateInternal items =
+            case items of
+                x :: xs ->
+                    if pred x then
+                        (updater x) :: xs
+                    else
+                        x :: (updateInternal xs)
+
+                [] ->
+                    []
+    in
+        updateInternal items
 
 
 updateSettings : SettingsMsg -> Settings -> Settings
@@ -481,7 +517,7 @@ viewCourse showLabs courseView =
     in
         span []
             ([ courseTitle course
-             , text " ~ "
+             , a [ onClick (ToggleDescriptionVisibility course) ] [ text " ~ " ]
              ]
                 ++ (if courseView.descriptionVisible then
                         [ blockquote []
