@@ -1,7 +1,7 @@
 {
     "version": "1.0.0",
-    "summary": "helpful summary of your project, less than 80 characters",
-    "repository": "https://github.com/user/project.git",
+    "summary": "Experimental port of U of C guava program to elm",
+    "repository": "https://github.com/matthewsj/u-of-c-guava.git",
     "license": "BSD3",
     "source-directories": [
         "."
