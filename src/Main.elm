@@ -1,12 +1,12 @@
 module Main exposing (..)
 
-import Comparator exposing (..)
 import Html exposing (..)
 import Html.App as App
 import Html.Attributes exposing (checked, class, href, id, name, type')
 import Html.Events exposing (onClick)
 import Json.Decode exposing ((:=), int, list, string, Decoder)
 import Json.Decode.Pipeline exposing (decode, required)
+import Ordering exposing (Ordering, breakTiesWith)
 import Regex
 import String
 
@@ -192,26 +192,26 @@ oDisj preds item =
     List.any (\pred -> pred item) preds
 
 
-compareQuarters : Comparator Quarter
+compareQuarters : Ordering Quarter
 compareQuarters =
-    explicitOrdering [ Summer, Autumn, Winter, Spring ]
+    Ordering.explicit [ Summer, Autumn, Winter, Spring ]
 
 
-allEqualComparator : Comparator a
+allEqualComparator : Ordering a
 allEqualComparator x y =
     EQ
 
 
-standardCourseSort : Comparator Course
+standardCourseSort : Ordering Course
 standardCourseSort =
-    compareField .year
-        |> breakTiesWith (compareFieldWith compareQuarters .quarter)
-        |> breakTiesWith (compareField .department)
-        |> breakTiesWith (compareField .number)
-        |> breakTiesWith (compareField .section)
+    Ordering.byField .year
+        |> breakTiesWith (Ordering.byFieldWith compareQuarters .quarter)
+        |> breakTiesWith (Ordering.byField .department)
+        |> breakTiesWith (Ordering.byField .number)
+        |> breakTiesWith (Ordering.byField .section)
 
 
-courseSort : SortOrder -> Comparator Course
+courseSort : SortOrder -> Ordering Course
 courseSort sortOrder =
     let
         overridingOrder =
@@ -220,16 +220,16 @@ courseSort sortOrder =
                     allEqualComparator
 
                 Department ->
-                    compareField .department
+                    Ordering.byField .department
 
                 Instructor ->
-                    compareField .instructor
+                    Ordering.byField .instructor
 
                 Title ->
-                    compareField .title
+                    Ordering.byField .title
 
                 Location ->
-                    compareField .location
+                    Ordering.byField .location
     in
         overridingOrder |> breakTiesWith standardCourseSort
 
@@ -272,11 +272,17 @@ update msg model =
 
 sameCourseNumberAsCourse : Course -> CourseView -> Bool
 sameCourseNumberAsCourse course courseView =
-    let course' = courseView.course
+    let
+        course' =
+            courseView.course
     in
-        course.department == course'.department
-            && course.number == course'.number
-            && course.section == course'.section
+        course.department
+            == course'.department
+            && course.number
+            == course'.number
+            && course.section
+            == course'.section
+
 
 updateFirstMatch : (a -> Bool) -> (a -> a) -> List a -> List a
 updateFirstMatch pred updater items =
