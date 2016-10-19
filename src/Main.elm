@@ -11,6 +11,48 @@ import Regex
 import String
 
 
+{-| The elm architecture revolves around a value of a user-defined type `Model` that starts with
+an initial value `init` and is rendered to HTML with a function called `view` of type
+`Model -> Html Msg`. Note that `Html` is a parameterized type: that means the HTML fragment can
+produce "messages" of type `Msg`, which is also a user-defined types. Messages are then processed
+by a function `update` of type `Msg -> Model -> Model` which takes the previous model plus a
+message and produces a new world.
+
+`main` is responsible for tying up all those pieces and acting as an entry point for the program.
+The three extra things going on here are:
+
+* This program actually takes "flags", which really means that on initialization it takes a value
+  provided by Javascript that it can use to build its initial `Model` value. Here we use that to
+  take the course list, which we receive as a JSON value that we parse. The `init` argument
+  is where that happens.
+
+* There's this funny thing where I say "! []" a couple of times. This is saying that my program
+  never has any commands that it wants to ask the elm runtime to perform. Effects are things like
+  fetching a resource over HTTP. This program doesn't need any of that.
+
+* There's an input called "subscriptions". This is how an elm program can get notified of external
+  inputs like mouse movements and such that aren't tied to direct interactions with our rendered
+  HTML. Again, our program doesn't need any of that so I've provided a stub.
+-}
+main : Program Json.Decode.Value
+main =
+    App.programWithFlags
+        { init = \v -> init v ! []
+        , update = \msg model -> update msg model ! []
+        , subscriptions = \_ -> Sub.none
+        , view = view
+        }
+
+
+{-| Our model consists of:
+
+* All the courses
+* The sorted, filtered list of courses that are displayed. (We don't need to do
+  this -- we could sort and filter in the view function -- but I didn't want to
+  have to do a potentially heavy-weight computation every render.)
+* The settings of the form (what buttons are checked and so on)
+* If there is an error message to display, what it is
+-}
 type alias Model =
     { allCourses : List Course
     , displayedCourses : List CourseView
@@ -118,30 +160,10 @@ initSort =
     QuarterAndNumber
 
 
-type Msg
-    = UpdateSettings SettingsMsg
-    | ToggleDescriptionVisibility Course
+{-| Converts filter settings into a predicate on courses.
 
-
-type SettingsMsg
-    = UpdateFilter FilterMsg
-    | SelectOrdering SortOrder
-    | ToggleShowLabInfo
-    | ResetFilters
-
-
-type FilterMsg
-    = ToggleQuarterSelected Quarter
-    | ToggleLevelSelected String
-    | ToggleDaySelected Day
-    | SelectDepartment (Maybe String)
-
-
-type SelectedState
-    = Selected
-    | NotSelected
-
-
+This is a fairly direct port of the logic in the original program.
+-}
 courseFilter : Filter -> Course -> Bool
 courseFilter { selectedQuarters, selectedLevels, selectedDays, departmentFilter } =
     oConj
@@ -234,6 +256,38 @@ courseSort sortOrder =
         overridingOrder |> breakTiesWith standardCourseSort
 
 
+{-| The actions that a user might perform by interacting with the page. At the top
+level it's just updating one of the settings or toggling the description on one
+of the course listings.
+-}
+type Msg
+    = UpdateSettings SettingsMsg
+    | ToggleDescriptionVisibility Course
+
+
+type SettingsMsg
+    = UpdateFilter FilterMsg
+    | SelectOrdering SortOrder
+    | ToggleShowLabInfo
+    | ResetFilters
+
+
+type FilterMsg
+    = ToggleQuarterSelected Quarter
+    | ToggleLevelSelected String
+    | ToggleDaySelected Day
+    | SelectDepartment (Maybe String)
+
+
+type SelectedState
+    = Selected
+    | NotSelected
+
+
+{-| Takes a message and the current state of the world and produces an updated state
+of the world. Since we bake the visible courses into the model, we need to make sure
+we do that here any time we update our settings.
+-}
 update : Msg -> Model -> Model
 update msg model =
     case msg of
@@ -263,27 +317,20 @@ update msg model =
             let
                 newCourses =
                     updateFirstMatch
-                        (sameCourseNumberAsCourse course)
+                        (\courseView -> courseView.course == course)
                         (\courseView -> { courseView | descriptionVisible = not courseView.descriptionVisible })
                         model.displayedCourses
             in
                 { model | displayedCourses = newCourses }
 
 
-sameCourseNumberAsCourse : Course -> CourseView -> Bool
-sameCourseNumberAsCourse course courseView =
-    let
-        course' =
-            courseView.course
-    in
-        course.department
-            == course'.department
-            && course.number
-            == course'.number
-            && course.section
-            == course'.section
+{-| Utility function: given a predicate and an "update" function, finds the first
+element in the given list that matches the predicate and replaces it with the
+result of the update function within the list.
 
-
+We use this in `ToggleDescriptionVisibility` above to find a course to toggle
+visibility for, and then update it with the toggled visibility.
+-}
 updateFirstMatch : (a -> Bool) -> (a -> a) -> List a -> List a
 updateFirstMatch pred updater items =
     let
@@ -341,73 +388,13 @@ toggleFilterList item items =
         item :: items
 
 
-checkbox : String -> Msg -> Bool -> Html Msg
-checkbox label msg isChecked =
-    span []
-        [ input
-            [ type' "checkbox"
-            , onClick msg
-            , checked isChecked
-            ]
-            []
-        , text label
-        ]
+{-| Renders the model into HTML.
 
-
-labeledGroup : String -> List (Html msg) -> Html msg
-labeledGroup label body =
-    fieldset []
-        ((legend [] [ text label ])
-            :: body
-        )
-
-
-checkboxGroup : String -> List a -> (a -> FilterMsg) -> List ( String, a ) -> Html Msg
-checkboxGroup label selectedOptions toMsg options =
-    labeledGroup label
-        (List.map
-            (uncurry
-                (\label option ->
-                    checkbox
-                        label
-                        (UpdateSettings <| UpdateFilter <| toMsg option)
-                        (List.member option selectedOptions)
-                )
-            )
-            options
-        )
-
-
-radioBox : String -> String -> Msg -> Bool -> Html Msg
-radioBox groupName label msg isSelected =
-    span []
-        [ input
-            [ type' "radio"
-            , checked isSelected
-            , onClick msg
-            ]
-            []
-        , text label
-        ]
-
-
-radioGroup : String -> String -> a -> (a -> Msg) -> List ( String, a ) -> Html Msg
-radioGroup label groupName selection toMsg options =
-    labeledGroup label
-        (List.map
-            (uncurry
-                (\label option ->
-                    radioBox
-                        groupName
-                        label
-                        (toMsg option)
-                        (option == selection)
-                )
-            )
-            options
-        )
-
-
+Elm provides functions that directly emit messages from the HTML result value
+in response to clicks or other events, but otherwise is basically a direct port
+of HTML elements into Elm. It is easy to write "UI components" as simple functions,
+though, and you see examples of that in things like `labeledGroup`.
+-}
 view : Model -> Html Msg
 view model =
     let
@@ -466,6 +453,88 @@ view model =
                 , viewTable model.settings.showLabInfo model.displayedCourses
                 ]
             ]
+
+
+{-| Renders a checkbox with a label.
+-}
+checkbox : String -> Msg -> Bool -> Html Msg
+checkbox label msg isChecked =
+    span []
+        [ input
+            [ type' "checkbox"
+            , onClick msg
+            , checked isChecked
+            ]
+            []
+        , text label
+        ]
+
+
+{-| Renders a box with a label and the given contents.
+-}
+labeledGroup : String -> List (Html msg) -> Html msg
+labeledGroup label body =
+    fieldset []
+        ((legend [] [ text label ])
+            :: body
+        )
+
+
+{-| Renders a labeled checkbox group with the given labels.
+
+You additionally provide a list of values (`options`) that conceptually be checked
+along with display names for each. You also provide a list of the ones that are currently
+checked, and a function for deciding what message to emit to report the checking or
+unchecking of a given option.
+-}
+checkboxGroup : String -> List a -> (a -> FilterMsg) -> List ( String, a ) -> Html Msg
+checkboxGroup label selectedOptions toMsg options =
+    labeledGroup label
+        (List.map
+            (uncurry
+                (\label option ->
+                    checkbox
+                        label
+                        (UpdateSettings <| UpdateFilter <| toMsg option)
+                        (List.member option selectedOptions)
+                )
+            )
+            options
+        )
+
+
+{-| Renders a radio button.
+ -}
+radioBox : String -> String -> Msg -> Bool -> Html Msg
+radioBox groupName label msg isSelected =
+    span []
+        [ input
+            [ type' "radio"
+            , checked isSelected
+            , onClick msg
+            ]
+            []
+        , text label
+        ]
+
+
+{-| Renders a box with radio buttons. Arguments are similar to `checkboxGroup` above.
+ -}
+radioGroup : String -> String -> a -> (a -> Msg) -> List ( String, a ) -> Html Msg
+radioGroup label groupName selection toMsg options =
+    labeledGroup label
+        (List.map
+            (uncurry
+                (\label option ->
+                    radioBox
+                        groupName
+                        label
+                        (toMsg option)
+                        (option == selection)
+                )
+            )
+            options
+        )
 
 
 quarterText : Quarter -> String
@@ -674,6 +743,47 @@ viewSettings settings =
         ]
 
 
+{-| The last piece: A function that takes a raw JSON value (the contents of
+`course-data.js`) and turns it into a model. The only interesting thing here is
+how we parse the JSON value using JSON parser combinators for the data format.
+-}
+init : Json.Decode.Value -> Model
+init jsonValue =
+    case Json.Decode.decodeValue ("courses" := list parseCourse) jsonValue of
+        Ok allCourses ->
+            { allCourses = allCourses
+            , displayedCourses =
+                allCourses
+                    |> List.sortWith standardCourseSort
+                    |> List.map (\c -> CourseView c False)
+            , settings =
+                { filter = initFilter
+                , sort = initSort
+                , showLabInfo = False
+                }
+            , error = Nothing
+            }
+
+        Err errorMessage ->
+            { allCourses = []
+            , displayedCourses = []
+            , settings =
+                { filter = initFilter
+                , sort = initSort
+                , showLabInfo = False
+                }
+            , error = Just errorMessage
+            }
+
+{-| Decoder for courses.
+
+In Elm, the `decodeValue` function (used above) is responsible for parsing
+JSON values, using a `Decoder` to guide it. This decoder decodes courses.
+As you can see, it's mostly just compositionally reading off fields --
+each entry specifies a field we expect to find in the JSON record for a
+course and, recursively, a decoder to read that field. Most are just "string"
+but a few are more interesting.
+ -}
 parseCourse : Decoder Course
 parseCourse =
     decode Course
@@ -702,6 +812,12 @@ parseCourse =
         |> required "registrar" (noneOr string)
 
 
+{-| A parser that succeeds only if the JSON value provided decodes
+with the given decoder to exactly the given value. If so, this decoder
+produces that value; otherwise it fails.
+
+We use this to look for specific values like the string "None".
+ -}
 parseConstant : Decoder a -> a -> Decoder a
 parseConstant decoder constant =
     decoder
@@ -713,7 +829,8 @@ parseConstant decoder constant =
                     Json.Decode.fail ("Not " ++ (toString constant))
             )
 
-
+{-| Parses year number from a string like "Autumn 2016"
+-}
 parseYearFromYearQuarter : Decoder Int
 parseYearFromYearQuarter =
     let
@@ -729,26 +846,9 @@ parseYearFromYearQuarter =
                     |> \r -> r `Result.andThen` String.toInt
             )
 
-
-parseLevelFromNum : Decoder String
-parseLevelFromNum =
-    let
-        toLevel courseNumber =
-            toString (firstDigit courseNumber * 100)
-    in
-        Json.Decode.map toLevel int
-
-
-firstDigit : Int -> Int
-firstDigit num =
-    case num // 10 of
-        0 ->
-            num
-
-        x ->
-            firstDigit x
-
-
+{-| Utility function that converts a list to a single-value success
+if the list contains exactly one item, or an error otherwise.
+ -}
 listToResultWithFailureMessage : err -> List a -> Result err a
 listToResultWithFailureMessage error items =
     case items of
@@ -758,7 +858,9 @@ listToResultWithFailureMessage error items =
         _ ->
             Err error
 
+{-| Parses quarter from a string like "Autumn 2016"
 
+ -}
 parseQuarterFromYearQuarter : Decoder Quarter
 parseQuarterFromYearQuarter =
     let
@@ -788,6 +890,30 @@ parseQuarterFromYearQuarter =
                 )
 
 
+{-| Parses the level ("200", "300", etc) from a course number (e.g. 23000, 31400).
+ -}
+parseLevelFromNum : Decoder String
+parseLevelFromNum =
+    let
+        toLevel courseNumber =
+            toString (firstDigit courseNumber * 100)
+    in
+        Json.Decode.map toLevel int
+
+
+firstDigit : Int -> Int
+firstDigit num =
+    case num // 10 of
+        0 ->
+            num
+
+        x ->
+            firstDigit x
+
+
+{-| Decodes a field that is either the literal string "None" or a value
+parsed by the given decoder.
+ -}
 noneOr : Decoder a -> Decoder (Maybe a)
 noneOr decoder =
     Json.Decode.oneOf
@@ -795,7 +921,8 @@ noneOr decoder =
         , Json.Decode.map Just decoder
         ]
 
-
+{-| Either "None" for False, or 1 for True.
+ -}
 booleanish : Decoder Bool
 booleanish =
     Json.Decode.oneOf
@@ -803,7 +930,8 @@ booleanish =
         , Json.Decode.map (\x -> True) (parseConstant int 1)
         ]
 
-
+{-| Reads a meeting time from a string like "MWF 9:30-10:20".
+ -}
 parseMeetingTime : Decoder MeetingTime
 parseMeetingTime =
     let
@@ -828,39 +956,3 @@ parseMeetingTime =
             MeetingTime (extractDays str) str
     in
         Json.Decode.map toMeetingTime string
-
-
-init : Json.Decode.Value -> Model
-init jsonValue =
-    case Json.Decode.decodeValue ("courses" := list parseCourse) jsonValue of
-        Ok allCourses ->
-            { allCourses = allCourses
-            , displayedCourses = List.map (\c -> CourseView c False) allCourses
-            , settings =
-                { filter = initFilter
-                , sort = initSort
-                , showLabInfo = False
-                }
-            , error = Nothing
-            }
-
-        Err errorMessage ->
-            { allCourses = []
-            , displayedCourses = []
-            , settings =
-                { filter = initFilter
-                , sort = initSort
-                , showLabInfo = False
-                }
-            , error = Just errorMessage
-            }
-
-
-main : Program Json.Decode.Value
-main =
-    App.programWithFlags
-        { init = \v -> (Debug.log "init" (init v)) ! []
-        , update = \msg model -> update msg model ! []
-        , subscriptions = \_ -> Sub.none
-        , view = view
-        }
